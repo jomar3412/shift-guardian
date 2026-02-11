@@ -13,6 +13,10 @@ export default {
       },
     },
     extend: {
+      fontFamily: {
+        sans: ['"IBM Plex Sans"', 'system-ui', 'sans-serif'],
+        mono: ['"IBM Plex Mono"', 'monospace'],
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
@@ -57,6 +61,27 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        compliance: {
+          safe: "hsl(var(--compliance-safe))",
+          "safe-foreground": "hsl(var(--compliance-safe-foreground))",
+          "safe-bg": "hsl(var(--compliance-safe-bg))",
+          warning: "hsl(var(--compliance-warning))",
+          "warning-foreground": "hsl(var(--compliance-warning-foreground))",
+          "warning-bg": "hsl(var(--compliance-warning-bg))",
+          urgent: "hsl(var(--compliance-urgent))",
+          "urgent-foreground": "hsl(var(--compliance-urgent-foreground))",
+          "urgent-bg": "hsl(var(--compliance-urgent-bg))",
+          critical: "hsl(var(--compliance-critical))",
+          "critical-foreground": "hsl(var(--compliance-critical-foreground))",
+          "critical-bg": "hsl(var(--compliance-critical-bg))",
+          violation: "hsl(var(--compliance-violation))",
+          "violation-foreground": "hsl(var(--compliance-violation-foreground))",
+          "violation-bg": "hsl(var(--compliance-violation-bg))",
+        },
+        dashboard: {
+          header: "hsl(var(--dashboard-header))",
+          "header-foreground": "hsl(var(--dashboard-header-foreground))",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -65,25 +90,22 @@ export default {
       },
       keyframes: {
         "accordion-down": {
-          from: {
-            height: "0",
-          },
-          to: {
-            height: "var(--radix-accordion-content-height)",
-          },
+          from: { height: "0" },
+          to: { height: "var(--radix-accordion-content-height)" },
         },
         "accordion-up": {
-          from: {
-            height: "var(--radix-accordion-content-height)",
-          },
-          to: {
-            height: "0",
-          },
+          from: { height: "var(--radix-accordion-content-height)" },
+          to: { height: "0" },
+        },
+        "pulse-alert": {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0.6" },
         },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
+        "pulse-alert": "pulse-alert 1.5s ease-in-out infinite",
       },
     },
   },
