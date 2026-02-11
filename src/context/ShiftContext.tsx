@@ -14,6 +14,8 @@ interface ShiftContextType {
   startBreak: (id: string) => void;
   endBreak: (id: string) => void;
   markAbsent: (id: string) => void;
+  clockOut: (id: string) => void;
+  changeAssignment: (id: string, roleId: string) => void;
   updateSettings: (s: Partial<ShiftSettings>) => void;
 }
 
@@ -89,6 +91,18 @@ export function ShiftProvider({ children }: { children: React.ReactNode }) {
     ));
   }, []);
 
+  const clockOut = useCallback((id: string) => {
+    setEmployees(prev => prev.map(e =>
+      e.id === id ? { ...e, status: "clocked_out", actualEnd: new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false }) } : e
+    ));
+  }, []);
+
+  const changeAssignment = useCallback((id: string, roleId: string) => {
+    setEmployees(prev => prev.map(e =>
+      e.id === id ? { ...e, currentAssignmentId: roleId } : e
+    ));
+  }, []);
+
   const updateSettings = useCallback((s: Partial<ShiftSettings>) => {
     setSettings(prev => ({ ...prev, ...s }));
   }, []);
@@ -96,7 +110,8 @@ export function ShiftProvider({ children }: { children: React.ReactNode }) {
   return (
     <ShiftContext.Provider value={{
       employees, settings, addEmployee, updateEmployee, removeEmployee,
-      assignLunch, startLunch, endLunch, startBreak, endBreak, markAbsent, updateSettings,
+      assignLunch, startLunch, endLunch, startBreak, endBreak, markAbsent,
+      clockOut, changeAssignment, updateSettings,
     }}>
       {children}
     </ShiftContext.Provider>
