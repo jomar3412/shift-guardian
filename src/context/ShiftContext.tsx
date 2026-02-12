@@ -1,10 +1,11 @@
 import React, { createContext, useContext, useState, useCallback } from "react";
-import { Employee, ShiftSettings } from "@/types/shift";
+import { Employee, ShiftSettings, UndoAction } from "@/types/shift";
 import { generateId } from "@/lib/compliance";
 
 interface ShiftContextType {
   employees: Employee[];
   settings: ShiftSettings;
+  undoStack: UndoAction[];
   addEmployee: (emp: Omit<Employee, "id" | "lunchStatus" | "breakStatus" | "status">) => void;
   updateEmployee: (id: string, updates: Partial<Employee>) => void;
   removeEmployee: (id: string) => void;
@@ -15,8 +16,11 @@ interface ShiftContextType {
   endBreak: (id: string) => void;
   markAbsent: (id: string) => void;
   clockOut: (id: string) => void;
-  changeAssignment: (id: string, roleId: string) => void;
+  changeAssignment: (id: string, subRoleId: string) => void;
   updateSettings: (s: Partial<ShiftSettings>) => void;
+  pushUndo: (action: Omit<UndoAction, "id" | "timestamp">) => void;
+  popUndo: () => void;
+  clearUndo: () => void;
 }
 
 const ShiftContext = createContext<ShiftContextType | null>(null);
@@ -27,6 +31,8 @@ export function useShift() {
   return ctx;
 }
 
+const MAX_UNDO = 5;
+
 export function ShiftProvider({ children }: { children: React.ReactNode }) {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [settings, setSettings] = useState<ShiftSettings>({
@@ -34,6 +40,22 @@ export function ShiftProvider({ children }: { children: React.ReactNode }) {
     gracePeriodMinutes: 5,
     overtimeThresholdHours: 8,
   });
+  const [undoStack, setUndoStack] = useState<UndoAction[]>([]);
+
+  const pushUndo = useCallback((action: Omit<UndoAction, "id" | "timestamp">) => {
+    setUndoStack(prev => [{ ...action, id: generateId(), timestamp: Date.now() }, ...prev].slice(0, MAX_UNDO));
+  }, []);
+
+  const popUndo = useCallback(() => {
+    setUndoStack(prev => {
+      if (prev.length === 0) return prev;
+      const [top, ...rest] = prev;
+      top.undo();
+      return rest;
+    });
+  }, []);
+
+  const clearUndo = useCallback(() => setUndoStack([]), []);
 
   const addEmployee = useCallback((emp: Omit<Employee, "id" | "lunchStatus" | "breakStatus" | "status">) => {
     const newEmp: Employee = {
@@ -45,27 +67,57 @@ export function ShiftProvider({ children }: { children: React.ReactNode }) {
       actualStart: emp.actualStart || emp.scheduledStart,
     };
     setEmployees(prev => [...prev, newEmp]);
-  }, []);
+    pushUndo({
+      label: `Added ${emp.name} to shift`,
+      undo: () => setEmployees(prev => prev.filter(e => e.id !== newEmp.id)),
+    });
+  }, [pushUndo]);
 
   const updateEmployee = useCallback((id: string, updates: Partial<Employee>) => {
     setEmployees(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
   }, []);
 
   const removeEmployee = useCallback((id: string) => {
-    setEmployees(prev => prev.filter(e => e.id !== id));
-  }, []);
+    setEmployees(prev => {
+      const emp = prev.find(e => e.id === id);
+      if (emp) {
+        pushUndo({
+          label: `Removed ${emp.name} from shift`,
+          undo: () => setEmployees(p => [...p, emp]),
+        });
+      }
+      return prev.filter(e => e.id !== id);
+    });
+  }, [pushUndo]);
 
   const assignLunch = useCallback((id: string) => {
     setEmployees(prev => prev.map(e =>
       e.id === id ? { ...e, lunchStatus: "pending", lunchAssignedAt: Date.now() } : e
     ));
-  }, []);
+    const emp = employees.find(e => e.id === id);
+    if (emp) {
+      pushUndo({
+        label: `Assigned lunch to ${emp.name}`,
+        undo: () => setEmployees(p => p.map(e => e.id === id ? { ...e, lunchStatus: "not_started", lunchAssignedAt: undefined } : e)),
+      });
+    }
+  }, [employees, pushUndo]);
 
   const startLunch = useCallback((id: string, manualTime?: number) => {
+    const ts = manualTime || Date.now();
     setEmployees(prev => prev.map(e =>
-      e.id === id ? { ...e, lunchStatus: "on_lunch", lunchStartedAt: manualTime || Date.now() } : e
+      e.id === id ? { ...e, lunchStatus: "on_lunch", lunchStartedAt: ts } : e
     ));
-  }, []);
+    const emp = employees.find(e => e.id === id);
+    if (emp) {
+      const prevStatus = emp.lunchStatus;
+      const prevAssigned = emp.lunchAssignedAt;
+      pushUndo({
+        label: `Started lunch for ${emp.name}`,
+        undo: () => setEmployees(p => p.map(e => e.id === id ? { ...e, lunchStatus: prevStatus, lunchStartedAt: undefined, lunchAssignedAt: prevAssigned } : e)),
+      });
+    }
+  }, [employees, pushUndo]);
 
   const endLunch = useCallback((id: string) => {
     setEmployees(prev => prev.map(e =>
@@ -77,7 +129,14 @@ export function ShiftProvider({ children }: { children: React.ReactNode }) {
     setEmployees(prev => prev.map(e =>
       e.id === id ? { ...e, breakStatus: "on_break", breakStartedAt: Date.now() } : e
     ));
-  }, []);
+    const emp = employees.find(e => e.id === id);
+    if (emp) {
+      pushUndo({
+        label: `Started break for ${emp.name}`,
+        undo: () => setEmployees(p => p.map(e => e.id === id ? { ...e, breakStatus: "not_started", breakStartedAt: undefined } : e)),
+      });
+    }
+  }, [employees, pushUndo]);
 
   const endBreak = useCallback((id: string) => {
     setEmployees(prev => prev.map(e =>
@@ -92,16 +151,32 @@ export function ShiftProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const clockOut = useCallback((id: string) => {
-    setEmployees(prev => prev.map(e =>
-      e.id === id ? { ...e, status: "clocked_out", actualEnd: new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false }) } : e
-    ));
-  }, []);
+    const now = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+    setEmployees(prev => {
+      const emp = prev.find(e => e.id === id);
+      if (emp) {
+        pushUndo({
+          label: `Clocked out ${emp.name}`,
+          undo: () => setEmployees(p => p.map(e => e.id === id ? { ...e, status: "active", actualEnd: undefined } : e)),
+        });
+      }
+      return prev.map(e => e.id === id ? { ...e, status: "clocked_out", actualEnd: now } : e);
+    });
+  }, [pushUndo]);
 
-  const changeAssignment = useCallback((id: string, roleId: string) => {
-    setEmployees(prev => prev.map(e =>
-      e.id === id ? { ...e, currentAssignmentId: roleId } : e
-    ));
-  }, []);
+  const changeAssignment = useCallback((id: string, subRoleId: string) => {
+    setEmployees(prev => {
+      const emp = prev.find(e => e.id === id);
+      if (emp) {
+        const oldRole = emp.currentAssignmentId;
+        pushUndo({
+          label: `Reassigned ${emp.name}`,
+          undo: () => setEmployees(p => p.map(e => e.id === id ? { ...e, currentAssignmentId: oldRole } : e)),
+        });
+      }
+      return prev.map(e => e.id === id ? { ...e, currentAssignmentId: subRoleId } : e);
+    });
+  }, [pushUndo]);
 
   const updateSettings = useCallback((s: Partial<ShiftSettings>) => {
     setSettings(prev => ({ ...prev, ...s }));
@@ -109,9 +184,9 @@ export function ShiftProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <ShiftContext.Provider value={{
-      employees, settings, addEmployee, updateEmployee, removeEmployee,
+      employees, settings, undoStack, addEmployee, updateEmployee, removeEmployee,
       assignLunch, startLunch, endLunch, startBreak, endBreak, markAbsent,
-      clockOut, changeAssignment, updateSettings,
+      clockOut, changeAssignment, updateSettings, pushUndo, popUndo, clearUndo,
     }}>
       {children}
     </ShiftContext.Provider>

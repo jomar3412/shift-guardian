@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AppProvider } from "@/context/AppContext";
 import { ShiftProvider } from "@/context/ShiftContext";
 import { AppLayout } from "@/components/AppLayout";
+import { UndoBanner } from "@/components/UndoBanner";
 import DashboardPage from "@/pages/DashboardPage";
 import ManageShiftsPage from "@/pages/ManageShiftsPage";
 import EmployeesPage from "@/pages/EmployeesPage";
@@ -33,6 +34,7 @@ const App = () => (
               </Route>
               <Route path="*" element={<NotFound />} />
             </Routes>
+            <UndoBanner />
           </BrowserRouter>
         </ShiftProvider>
       </AppProvider>

@@ -1,13 +1,17 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
-import { Role, EmployeeRecord, AppSettings } from "@/types/shift";
+import { PrimaryRole, SubRole, EmployeeRecord, AppSettings } from "@/types/shift";
 import { generateId } from "@/lib/compliance";
 
 interface AppContextType {
-  roles: Role[];
-  addRole: (role: Omit<Role, "id">) => void;
-  updateRole: (id: string, updates: Partial<Role>) => void;
-  removeRole: (id: string) => void;
-  getRoleById: (id: string) => Role | undefined;
+  primaryRoles: PrimaryRole[];
+  addPrimaryRole: (role: Omit<PrimaryRole, "id">) => void;
+  updatePrimaryRole: (id: string, updates: Partial<PrimaryRole>) => void;
+  removePrimaryRole: (id: string) => void;
+
+  subRoles: SubRole[];
+  addSubRole: (role: Omit<SubRole, "id">) => void;
+  updateSubRole: (id: string, updates: Partial<SubRole>) => void;
+  removeSubRole: (id: string) => void;
 
   employeeRecords: EmployeeRecord[];
   addEmployeeRecord: (rec: Omit<EmployeeRecord, "id">) => void;
@@ -16,6 +20,10 @@ interface AppContextType {
 
   appSettings: AppSettings;
   updateAppSettings: (s: Partial<AppSettings>) => void;
+
+  getSubRoleById: (id: string) => SubRole | undefined;
+  getPrimaryRoleById: (id: string) => PrimaryRole | undefined;
+  getQualifiedSubRoles: (record: EmployeeRecord) => SubRole[];
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -26,10 +34,20 @@ export function useApp() {
   return ctx;
 }
 
-const DEFAULT_ROLES: Role[] = [
-  { id: "cashier", name: "Cashier", type: "standard", minCoverage: 2, coverageProtection: true },
-  { id: "self-checkout", name: "Self-Checkout", type: "standard", minCoverage: 1, coverageProtection: true },
-  { id: "front-end-manager", name: "Front-End Manager", type: "management", minCoverage: 1, coverageProtection: true },
+const DEFAULT_PRIMARY_ROLES: PrimaryRole[] = [
+  { id: "fe-associate", name: "Front-End Teaming Associate", type: "standard" },
+  { id: "team-lead", name: "Team Lead", type: "management" },
+  { id: "cart-associate", name: "Cart Associate", type: "support" },
+];
+
+const DEFAULT_SUB_ROLES: SubRole[] = [
+  { id: "cashier", name: "Cashier", requiresRegisterAccess: true, minCoverage: 2, coverageProtection: true },
+  { id: "self-checkout", name: "Self-Checkout", requiresRegisterAccess: true, minCoverage: 1, coverageProtection: true },
+  { id: "service-desk", name: "Service Desk", requiresRegisterAccess: true, minCoverage: 1, coverageProtection: true },
+  { id: "grocery-door", name: "Grocery Door", requiresRegisterAccess: false, minCoverage: 0, coverageProtection: false },
+  { id: "pharmacy-door", name: "Pharmacy Door", requiresRegisterAccess: false, minCoverage: 0, coverageProtection: false },
+  { id: "cart-pusher", name: "Cart Pusher", requiresRegisterAccess: false, minCoverage: 0, coverageProtection: false },
+  { id: "floor-coverage", name: "Floor Coverage", requiresRegisterAccess: false, minCoverage: 1, coverageProtection: true },
 ];
 
 function loadFromStorage<T>(key: string, fallback: T): T {
@@ -42,46 +60,48 @@ function loadFromStorage<T>(key: string, fallback: T): T {
 }
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [roles, setRoles] = useState<Role[]>(() => loadFromStorage("sg_roles", DEFAULT_ROLES));
+  const [primaryRoles, setPrimaryRoles] = useState<PrimaryRole[]>(() => loadFromStorage("sg_primary_roles", DEFAULT_PRIMARY_ROLES));
+  const [subRoles, setSubRoles] = useState<SubRole[]>(() => loadFromStorage("sg_sub_roles", DEFAULT_SUB_ROLES));
   const [employeeRecords, setEmployeeRecords] = useState<EmployeeRecord[]>(() => loadFromStorage("sg_employees", []));
   const [appSettings, setAppSettings] = useState<AppSettings>(() =>
     loadFromStorage("sg_settings", { darkMode: false, timeFormat: "12h" as const })
   );
 
-  // Persist to localStorage
-  useEffect(() => { localStorage.setItem("sg_roles", JSON.stringify(roles)); }, [roles]);
+  useEffect(() => { localStorage.setItem("sg_primary_roles", JSON.stringify(primaryRoles)); }, [primaryRoles]);
+  useEffect(() => { localStorage.setItem("sg_sub_roles", JSON.stringify(subRoles)); }, [subRoles]);
   useEffect(() => { localStorage.setItem("sg_employees", JSON.stringify(employeeRecords)); }, [employeeRecords]);
   useEffect(() => { localStorage.setItem("sg_settings", JSON.stringify(appSettings)); }, [appSettings]);
 
-  // Apply dark mode
   useEffect(() => {
     document.documentElement.classList.toggle("dark", appSettings.darkMode);
   }, [appSettings.darkMode]);
 
-  const addRole = useCallback((role: Omit<Role, "id">) => {
-    setRoles(prev => [...prev, { ...role, id: generateId() }]);
+  const addPrimaryRole = useCallback((role: Omit<PrimaryRole, "id">) => {
+    setPrimaryRoles(prev => [...prev, { ...role, id: generateId() }]);
+  }, []);
+  const updatePrimaryRole = useCallback((id: string, updates: Partial<PrimaryRole>) => {
+    setPrimaryRoles(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
+  }, []);
+  const removePrimaryRole = useCallback((id: string) => {
+    setPrimaryRoles(prev => prev.filter(r => r.id !== id));
   }, []);
 
-  const updateRole = useCallback((id: string, updates: Partial<Role>) => {
-    setRoles(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
+  const addSubRole = useCallback((role: Omit<SubRole, "id">) => {
+    setSubRoles(prev => [...prev, { ...role, id: generateId() }]);
   }, []);
-
-  const removeRole = useCallback((id: string) => {
-    setRoles(prev => prev.filter(r => r.id !== id));
+  const updateSubRole = useCallback((id: string, updates: Partial<SubRole>) => {
+    setSubRoles(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
   }, []);
-
-  const getRoleById = useCallback((id: string) => {
-    return roles.find(r => r.id === id);
-  }, [roles]);
+  const removeSubRole = useCallback((id: string) => {
+    setSubRoles(prev => prev.filter(r => r.id !== id));
+  }, []);
 
   const addEmployeeRecord = useCallback((rec: Omit<EmployeeRecord, "id">) => {
     setEmployeeRecords(prev => [...prev, { ...rec, id: generateId() }]);
   }, []);
-
   const updateEmployeeRecord = useCallback((id: string, updates: Partial<EmployeeRecord>) => {
     setEmployeeRecords(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
   }, []);
-
   const removeEmployeeRecord = useCallback((id: string) => {
     setEmployeeRecords(prev => prev.filter(e => e.id !== id));
   }, []);
@@ -90,11 +110,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setAppSettings(prev => ({ ...prev, ...s }));
   }, []);
 
+  const getSubRoleById = useCallback((id: string) => subRoles.find(r => r.id === id), [subRoles]);
+  const getPrimaryRoleById = useCallback((id: string) => primaryRoles.find(r => r.id === id), [primaryRoles]);
+
+  const getQualifiedSubRoles = useCallback((record: EmployeeRecord): SubRole[] => {
+    return record.qualifications
+      .map(q => subRoles.find(sr => sr.id === q.subRoleId))
+      .filter((sr): sr is SubRole => {
+        if (!sr) return false;
+        if (sr.requiresRegisterAccess && !record.hasRegisterAccess) return false;
+        return true;
+      });
+  }, [subRoles]);
+
   return (
     <AppContext.Provider value={{
-      roles, addRole, updateRole, removeRole, getRoleById,
+      primaryRoles, addPrimaryRole, updatePrimaryRole, removePrimaryRole,
+      subRoles, addSubRole, updateSubRole, removeSubRole,
       employeeRecords, addEmployeeRecord, updateEmployeeRecord, removeEmployeeRecord,
       appSettings, updateAppSettings,
+      getSubRoleById, getPrimaryRoleById, getQualifiedSubRoles,
     }}>
       {children}
     </AppContext.Provider>
