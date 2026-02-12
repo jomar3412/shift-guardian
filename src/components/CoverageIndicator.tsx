@@ -5,13 +5,11 @@ import { Users, AlertTriangle } from "lucide-react";
 
 export function CoverageIndicator() {
   const { employees } = useShift();
-  const { roles } = useApp();
+  const { subRoles } = useApp();
 
-  const rolesWithCoverage = roles.filter(r => r.coverageProtection);
+  const rolesWithCoverage = subRoles.filter(r => r.coverageProtection);
 
-  if (rolesWithCoverage.length === 0) {
-    return null;
-  }
+  if (rolesWithCoverage.length === 0) return null;
 
   return (
     <div className="space-y-2">

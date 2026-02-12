@@ -1,4 +1,4 @@
-import { ComplianceInfo, ComplianceLevel, Employee, Role } from "@/types/shift";
+import { ComplianceInfo, ComplianceLevel, Employee, SubRole } from "@/types/shift";
 
 export function parseTime(time: string): Date {
   const [h, m] = time.split(":").map(Number);
@@ -74,31 +74,47 @@ export function getLunchPriorityQueue(employees: Employee[]): Employee[] {
     .sort((a, b) => getMinutesToFifthHour(a) - getMinutesToFifthHour(b));
 }
 
-export function getActiveCashierCount(employees: Employee[]): number {
+export function getActiveCountByRole(employees: Employee[], subRoleId: string): number {
   return employees.filter(
-    e => e.status === "active" && e.lunchStatus !== "on_lunch"
+    e => e.status === "active" && e.lunchStatus !== "on_lunch" && e.currentAssignmentId === subRoleId
   ).length;
 }
 
-export function getActiveCountByRole(employees: Employee[], roleId: string): number {
-  return employees.filter(
-    e => e.status === "active" && e.lunchStatus !== "on_lunch" && e.currentAssignmentId === roleId
-  ).length;
-}
-
-export function checkCoverageForLunch(employees: Employee[], employeeId: string, roles: Role[]): { safe: boolean; warnings: string[] } {
+export function checkCoverageForLunch(employees: Employee[], employeeId: string, subRoles: SubRole[]): { safe: boolean; warnings: string[] } {
   const emp = employees.find(e => e.id === employeeId);
   if (!emp) return { safe: true, warnings: [] };
   const warnings: string[] = [];
-  const roleId = emp.currentAssignmentId;
-  const role = roles.find(r => r.id === roleId);
-  if (role && role.coverageProtection) {
-    const current = getActiveCountByRole(employees, roleId);
-    if (current - 1 < role.minCoverage) {
-      warnings.push(`Sending ${emp.name} to lunch drops ${role.name} below minimum (${role.minCoverage}).`);
+  const subRoleId = emp.currentAssignmentId;
+  const subRole = subRoles.find(r => r.id === subRoleId);
+  if (subRole && subRole.coverageProtection) {
+    const current = getActiveCountByRole(employees, subRoleId);
+    if (current - 1 < subRole.minCoverage) {
+      warnings.push(`Sending ${emp.name} to lunch drops ${subRole.name} below minimum (${subRole.minCoverage}).`);
     }
   }
   return { safe: warnings.length === 0, warnings };
+}
+
+/** Sort employees by compliance priority for dashboard display */
+export function sortByCompliancePriority(employees: Employee[]): Employee[] {
+  const levelOrder: Record<ComplianceLevel, number> = {
+    violation: 0,
+    critical: 1,
+    urgent: 2,
+    warning: 3,
+    safe: 4,
+  };
+
+  return [...employees].sort((a, b) => {
+    const aInfo = getComplianceInfo(a);
+    const bInfo = getComplianceInfo(b);
+    // Active first, then by compliance level
+    if (a.status !== b.status) {
+      if (a.status === "active") return -1;
+      if (b.status === "active") return 1;
+    }
+    return (levelOrder[aInfo.level] ?? 5) - (levelOrder[bInfo.level] ?? 5);
+  });
 }
 
 export function generateId(): string {
