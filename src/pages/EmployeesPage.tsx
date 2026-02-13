@@ -72,7 +72,7 @@ export default function EmployeesPage() {
           {filtered.map(emp => {
             const isExpanded = expandedId === emp.id;
             const primary = primaryRoles.find(r => r.id === emp.primaryRoleId);
-            const qualTags = emp.qualifications
+            const qualTags = (emp.qualifications || [])
               .map(q => subRoles.find(sr => sr.id === q.subRoleId)?.name)
               .filter(Boolean);
 
@@ -111,7 +111,7 @@ export default function EmployeesPage() {
                   <div className="px-3 pb-3 border-t border-border pt-3 space-y-3" onClick={e => e.stopPropagation()}>
                     <div className="space-y-1.5">
                       <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Qualified Roles</div>
-                      {emp.qualifications.map(q => {
+                      {(emp.qualifications || []).map(q => {
                         const sr = subRoles.find(s => s.id === q.subRoleId);
                         return (
                           <div key={q.subRoleId} className="flex items-center justify-between text-sm bg-muted rounded-md px-2 py-1.5">
@@ -120,7 +120,7 @@ export default function EmployeesPage() {
                           </div>
                         );
                       })}
-                      {emp.qualifications.length === 0 && (
+                      {(emp.qualifications || []).length === 0 && (
                         <p className="text-xs text-muted-foreground">No qualifications set</p>
                       )}
                     </div>
