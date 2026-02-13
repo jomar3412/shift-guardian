@@ -114,7 +114,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const getPrimaryRoleById = useCallback((id: string) => primaryRoles.find(r => r.id === id), [primaryRoles]);
 
   const getQualifiedSubRoles = useCallback((record: EmployeeRecord): SubRole[] => {
-    return record.qualifications
+    return (record.qualifications || [])
       .map(q => subRoles.find(sr => sr.id === q.subRoleId))
       .filter((sr): sr is SubRole => {
         if (!sr) return false;
