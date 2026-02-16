@@ -2,11 +2,13 @@ import { useState, useEffect } from "react";
 import { Employee, ComplianceInfo } from "@/types/shift";
 import { useShift } from "@/context/ShiftContext";
 import { useApp } from "@/context/AppContext";
+import { useAuth } from "@/context/AuthContext";
 import { getComplianceInfo, formatDuration, getMinutesToFifthHour, checkCoverageForLunch } from "@/lib/compliance";
+import { CoverageDialog } from "@/components/CoverageDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Clock, Coffee, UtensilsCrossed, UserX, Play, Square, AlertTriangle, LogOut, ChevronDown, ChevronUp } from "lucide-react";
+import { Clock, Coffee, UtensilsCrossed, UserX, Play, Square, AlertTriangle, LogOut, ChevronDown, ChevronUp, Shield } from "lucide-react";
 import { toast } from "sonner";
 
 const complianceColors: Record<string, { border: string; bg: string; dot: string }> = {
@@ -20,12 +22,15 @@ const complianceColors: Record<string, { border: string; bg: string; dot: string
 const breakDot = "bg-primary";
 
 export function EmployeeCard({ employee }: { employee: Employee }) {
-  const { assignLunch, startLunch, endLunch, startBreak, endBreak, clockOut, changeAssignment, employees } = useShift();
+  const { assignLunch, startLunch, endLunch, startBreak, endBreak, clockOut, changeAssignment, employees, getCoverageFor, getCoveringBy, addCoverage } = useShift();
   const { subRoles, employeeRecords, getPrimaryRoleById, getQualifiedSubRoles } = useApp();
+  const { isAdmin } = useAuth();
   const [info, setInfo] = useState<ComplianceInfo>(() => getComplianceInfo(employee));
   const [expanded, setExpanded] = useState(false);
   const [showManualLunch, setShowManualLunch] = useState(false);
   const [manualLunchTime, setManualLunchTime] = useState("");
+  const [coverageDialogOpen, setCoverageDialogOpen] = useState(false);
+  const [coverageReason, setCoverageReason] = useState<"lunch" | "break">("lunch");
 
   useEffect(() => {
     const interval = setInterval(() => setInfo(getComplianceInfo(employee)), 5000);
@@ -46,15 +51,44 @@ export function EmployeeCard({ employee }: { employee: Employee }) {
   const currentSubRole = subRoles.find(r => r.id === employee.currentAssignmentId);
   const primaryRole = getPrimaryRoleById(employee.primaryRoleId);
 
-  const handleAssignLunch = () => {
+  // Coverage badges
+  const coverageFor = getCoverageFor(employee.id);
+  const coveringBy = getCoveringBy(employee.id);
+  const coverByName = coverageFor ? employees.find(e => e.id === coverageFor.coveredById)?.name : null;
+  const coveringForName = coveringBy ? employees.find(e => e.id === coveringBy.employeeId)?.name : null;
+  const coveringRoleName = coveringBy ? subRoles.find(r => r.id === coveringBy.coverRole)?.name : null;
+
+  const handleAssignLunchWithCoverage = () => {
+    if (!isAdmin) return;
     const { safe, warnings } = checkCoverageForLunch(employees, employee.id, subRoles);
     if (!safe) {
-      toast.warning(warnings[0], {
-        action: { label: "Send Anyway", onClick: () => assignLunch(employee.id) },
-      });
-      return;
+      toast.warning(warnings[0]);
     }
-    assignLunch(employee.id);
+    setCoverageReason("lunch");
+    setCoverageDialogOpen(true);
+  };
+
+  const handleBreakWithCoverage = () => {
+    if (!isAdmin) return;
+    setCoverageReason("break");
+    setCoverageDialogOpen(true);
+  };
+
+  const handleCoverageConfirm = (coveredById: string, coverRoleId: string) => {
+    addCoverage({
+      employeeId: employee.id,
+      coveredById,
+      originalRole: employee.currentAssignmentId,
+      coverRole: coverRoleId,
+      reason: coverageReason,
+    });
+    if (coverageReason === "lunch") {
+      startLunch(employee.id);
+      toast.success(`${employee.name} started lunch`);
+    } else {
+      startBreak(employee.id);
+      toast.success(`${employee.name} started break`);
+    }
   };
 
   const handleStartLunch = () => {
@@ -73,7 +107,7 @@ export function EmployeeCard({ employee }: { employee: Employee }) {
     setManualLunchTime("");
   };
 
-  // Inactive states - minimal card
+  // Inactive states
   if (employee.status === "absent" || employee.status === "clocked_out") {
     return (
       <div className="rounded-lg border border-border bg-card p-3 opacity-50">
@@ -92,156 +126,164 @@ export function EmployeeCard({ employee }: { employee: Employee }) {
   const isOnBreak = employee.breakStatus === "on_break";
 
   return (
-    <div
-      className={`rounded-lg border-l-4 ${colors.border} border border-border bg-card ${colors.bg} transition-all`}
-      onClick={() => setExpanded(!expanded)}
-    >
-      {/* Collapsed view - always visible */}
-      <div className="px-3 py-2.5 flex items-center gap-3 cursor-pointer select-none">
-        <div className={`h-2.5 w-2.5 rounded-full flex-shrink-0 ${isOnBreak ? breakDot : colors.dot}`} />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-foreground text-sm truncate">{employee.name}</span>
-            <span className="text-[11px] text-muted-foreground truncate hidden sm:inline">{primaryRole?.name}</span>
+    <>
+      <div
+        className={`rounded-lg border-l-4 ${colors.border} border border-border bg-card ${colors.bg} transition-all`}
+        onClick={() => setExpanded(!expanded)}
+      >
+        {/* Collapsed view */}
+        <div className="px-3 py-2.5 flex items-center gap-3 cursor-pointer select-none">
+          <div className={`h-2.5 w-2.5 rounded-full flex-shrink-0 ${isOnBreak ? breakDot : colors.dot}`} />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-foreground text-sm truncate">{employee.name}</span>
+              <span className="text-[11px] text-muted-foreground truncate hidden sm:inline">{primaryRole?.name}</span>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
+              <span className="font-medium">{currentSubRole?.name || "—"}</span>
+              {info.minutesToFifthHour !== Infinity && info.minutesToFifthHour > 0 && (
+                <span className={`font-mono ${info.level === "critical" || info.level === "violation" ? "text-compliance-critical font-bold" : ""}`}>
+                  {formatDuration(info.minutesToFifthHour)} to 5th
+                </span>
+              )}
+              {info.level === "violation" && <span className="text-compliance-violation font-bold">VIOLATION</span>}
+              {isOnBreak && <span className="text-primary font-medium">On Break</span>}
+              {/* Coverage badges */}
+              {coverByName && (
+                <span className="inline-flex items-center gap-1 text-[10px] bg-accent text-accent-foreground rounded-full px-2 py-0.5">
+                  <Shield className="h-3 w-3" /> Covered by: {coverByName}
+                </span>
+              )}
+              {coveringForName && (
+                <span className="inline-flex items-center gap-1 text-[10px] bg-primary/10 text-primary rounded-full px-2 py-0.5">
+                  <Shield className="h-3 w-3" /> Covering: {coveringRoleName} ({coveringForName})
+                </span>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="font-medium">{currentSubRole?.name || "—"}</span>
-            {info.minutesToFifthHour !== Infinity && info.minutesToFifthHour > 0 && (
-              <span className={`font-mono ${info.level === "critical" || info.level === "violation" ? "text-compliance-critical font-bold" : ""}`}>
-                {formatDuration(info.minutesToFifthHour)} to 5th
-              </span>
-            )}
-            {info.level === "violation" && <span className="text-compliance-violation font-bold">VIOLATION</span>}
-            {isOnBreak && <span className="text-primary font-medium">On Break</span>}
-          </div>
+          <ComplianceBadge info={info} />
+          {expanded ? <ChevronUp className="h-4 w-4 text-muted-foreground flex-shrink-0" /> : <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />}
         </div>
-        <ComplianceBadge info={info} />
-        {expanded ? <ChevronUp className="h-4 w-4 text-muted-foreground flex-shrink-0" /> : <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />}
+
+        {/* Expanded view */}
+        {expanded && (
+          <div className="px-3 pb-3 space-y-3 border-t border-border pt-3" onClick={e => e.stopPropagation()}>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <InfoChip label="Assignment" value={currentSubRole?.name || "—"} />
+              <InfoChip label="Hours Worked" value={formatDuration(info.hoursWorked * 60)} />
+              <InfoChip
+                label="5th Hour In"
+                value={info.minutesToFifthHour === Infinity ? "—" : info.minutesToFifthHour <= 0 ? "PAST" : formatDuration(info.minutesToFifthHour)}
+                highlight={info.minutesToFifthHour < 60 && info.minutesToFifthHour > 0}
+              />
+              <InfoChip label="Sched. Lunch" value={employee.scheduledLunch || "—"} />
+            </div>
+
+            {/* Change assignment - admin only */}
+            {isAdmin && qualifiedSubRoles.length > 1 && (
+              <Select value={employee.currentAssignmentId} onValueChange={(v) => changeAssignment(employee.id, v)}>
+                <SelectTrigger className="h-9 text-xs">
+                  <SelectValue placeholder="Change Assignment" />
+                </SelectTrigger>
+                <SelectContent>
+                  {qualifiedSubRoles.map(r => (
+                    <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+
+            {/* Action buttons - admin only */}
+            {isAdmin && (
+              <div className="flex flex-wrap gap-2">
+                {employee.lunchStatus === "not_started" && (
+                  <>
+                    <Button size="default" variant="outline" className="gap-2 flex-1 min-w-[120px]" onClick={handleAssignLunchWithCoverage}>
+                      <UtensilsCrossed className="h-4 w-4" />
+                      Assign Lunch
+                    </Button>
+                    <Button size="default" className="gap-2 flex-1 min-w-[120px] bg-compliance-safe text-compliance-safe-foreground hover:bg-compliance-safe/90" onClick={handleStartLunch}>
+                      <Play className="h-4 w-4" />
+                      Start Lunch
+                    </Button>
+                  </>
+                )}
+                {employee.lunchStatus === "pending" && (
+                  <>
+                    <Button size="default" className="gap-2 flex-1 bg-compliance-safe text-compliance-safe-foreground hover:bg-compliance-safe/90" onClick={handleStartLunch}>
+                      <Play className="h-4 w-4" />
+                      Start Lunch Now
+                    </Button>
+                    <div className="w-full text-xs text-compliance-warning font-medium flex items-center gap-1">
+                      <AlertTriangle className="h-3 w-3" />
+                      Assigned — waiting to leave
+                    </div>
+                  </>
+                )}
+                {employee.lunchStatus === "on_lunch" && (
+                  <Button size="default" className="gap-2 flex-1" onClick={() => endLunch(employee.id)}>
+                    <Square className="h-4 w-4" />
+                    End Lunch
+                  </Button>
+                )}
+                {employee.lunchStatus === "returned" && (
+                  <span className="compliance-badge bg-compliance-safe-bg text-compliance-safe text-xs">✓ Lunch done</span>
+                )}
+
+                {(employee.lunchStatus === "not_started" || employee.lunchStatus === "pending") && (
+                  <Button size="sm" variant="ghost" className="text-xs text-muted-foreground" onClick={() => setShowManualLunch(!showManualLunch)}>
+                    <Clock className="h-3 w-3 mr-1" />
+                    Enter Time
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {isAdmin && showManualLunch && (
+              <div className="flex gap-2 items-center">
+                <Input type="time" value={manualLunchTime} onChange={e => setManualLunchTime(e.target.value)} className="h-9 text-sm flex-1" />
+                <Button size="sm" onClick={handleManualLunch} disabled={!manualLunchTime}>Confirm</Button>
+              </div>
+            )}
+
+            {isAdmin && (
+              <div className="flex gap-2">
+                {employee.breakStatus === "not_started" && employee.lunchStatus !== "on_lunch" && (
+                  <Button size="sm" variant="secondary" className="gap-1.5 flex-1" onClick={handleBreakWithCoverage}>
+                    <Coffee className="h-3.5 w-3.5" />
+                    Log Break
+                  </Button>
+                )}
+                {employee.breakStatus === "on_break" && (
+                  <Button size="sm" variant="secondary" className="gap-1.5 flex-1" onClick={() => endBreak(employee.id)}>
+                    <Square className="h-3.5 w-3.5" />
+                    End Break
+                  </Button>
+                )}
+                {employee.breakStatus === "returned" && (
+                  <span className="text-xs text-muted-foreground self-center">Break done</span>
+                )}
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => {
+                  clockOut(employee.id);
+                  toast.success(`${employee.name} clocked out`);
+                }}>
+                  <LogOut className="h-3.5 w-3.5" />
+                  Clock Out
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Expanded view */}
-      {expanded && (
-        <div className="px-3 pb-3 space-y-3 border-t border-border pt-3" onClick={e => e.stopPropagation()}>
-          {/* Stats grid */}
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <InfoChip label="Assignment" value={currentSubRole?.name || "—"} />
-            <InfoChip label="Hours Worked" value={formatDuration(info.hoursWorked * 60)} />
-            <InfoChip
-              label="5th Hour In"
-              value={info.minutesToFifthHour === Infinity ? "—" : info.minutesToFifthHour <= 0 ? "PAST" : formatDuration(info.minutesToFifthHour)}
-              highlight={info.minutesToFifthHour < 60 && info.minutesToFifthHour > 0}
-            />
-            <InfoChip label="Sched. Lunch" value={employee.scheduledLunch || "—"} />
-          </div>
-
-          {/* Change assignment */}
-          {qualifiedSubRoles.length > 1 && (
-            <Select value={employee.currentAssignmentId} onValueChange={(v) => changeAssignment(employee.id, v)}>
-              <SelectTrigger className="h-9 text-xs">
-                <SelectValue placeholder="Change Assignment" />
-              </SelectTrigger>
-              <SelectContent>
-                {qualifiedSubRoles.map(r => (
-                  <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-
-          {/* Action buttons */}
-          <div className="flex flex-wrap gap-2">
-            {/* Lunch */}
-            {employee.lunchStatus === "not_started" && (
-              <>
-                <Button size="default" variant="outline" className="gap-2 flex-1 min-w-[120px]" onClick={handleAssignLunch}>
-                  <UtensilsCrossed className="h-4 w-4" />
-                  Assign Lunch
-                </Button>
-                <Button size="default" className="gap-2 flex-1 min-w-[120px] bg-compliance-safe text-compliance-safe-foreground hover:bg-compliance-safe/90" onClick={handleStartLunch}>
-                  <Play className="h-4 w-4" />
-                  Start Lunch
-                </Button>
-              </>
-            )}
-            {employee.lunchStatus === "pending" && (
-              <>
-                <Button size="default" className="gap-2 flex-1 bg-compliance-safe text-compliance-safe-foreground hover:bg-compliance-safe/90" onClick={handleStartLunch}>
-                  <Play className="h-4 w-4" />
-                  Start Lunch Now
-                </Button>
-                <div className="w-full text-xs text-compliance-warning font-medium flex items-center gap-1">
-                  <AlertTriangle className="h-3 w-3" />
-                  Assigned — waiting to leave
-                </div>
-              </>
-            )}
-            {employee.lunchStatus === "on_lunch" && (
-              <Button size="default" className="gap-2 flex-1" onClick={() => endLunch(employee.id)}>
-                <Square className="h-4 w-4" />
-                End Lunch
-              </Button>
-            )}
-            {employee.lunchStatus === "returned" && (
-              <span className="compliance-badge bg-compliance-safe-bg text-compliance-safe text-xs">✓ Lunch done</span>
-            )}
-
-            {/* Manual lunch entry */}
-            {(employee.lunchStatus === "not_started" || employee.lunchStatus === "pending") && (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-xs text-muted-foreground"
-                onClick={() => setShowManualLunch(!showManualLunch)}
-              >
-                <Clock className="h-3 w-3 mr-1" />
-                Enter Time
-              </Button>
-            )}
-          </div>
-
-          {/* Manual lunch time entry */}
-          {showManualLunch && (
-            <div className="flex gap-2 items-center">
-              <Input
-                type="time"
-                value={manualLunchTime}
-                onChange={e => setManualLunchTime(e.target.value)}
-                className="h-9 text-sm flex-1"
-              />
-              <Button size="sm" onClick={handleManualLunch} disabled={!manualLunchTime}>
-                Confirm
-              </Button>
-            </div>
-          )}
-
-          {/* Break + Clock out row */}
-          <div className="flex gap-2">
-            {employee.breakStatus === "not_started" && employee.lunchStatus !== "on_lunch" && (
-              <Button size="sm" variant="secondary" className="gap-1.5 flex-1" onClick={() => startBreak(employee.id)}>
-                <Coffee className="h-3.5 w-3.5" />
-                Log Break
-              </Button>
-            )}
-            {employee.breakStatus === "on_break" && (
-              <Button size="sm" variant="secondary" className="gap-1.5 flex-1" onClick={() => endBreak(employee.id)}>
-                <Square className="h-3.5 w-3.5" />
-                End Break
-              </Button>
-            )}
-            {employee.breakStatus === "returned" && (
-              <span className="text-xs text-muted-foreground self-center">Break done</span>
-            )}
-            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => {
-              clockOut(employee.id);
-              toast.success(`${employee.name} clocked out`);
-            }}>
-              <LogOut className="h-3.5 w-3.5" />
-              Clock Out
-            </Button>
-          </div>
-        </div>
-      )}
-    </div>
+      <CoverageDialog
+        open={coverageDialogOpen}
+        onOpenChange={setCoverageDialogOpen}
+        employee={employee}
+        reason={coverageReason}
+        onConfirm={handleCoverageConfirm}
+      />
+    </>
   );
 }
 
