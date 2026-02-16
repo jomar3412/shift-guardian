@@ -2,10 +2,22 @@ import React, { createContext, useContext, useState, useCallback } from "react";
 import { Employee, ShiftSettings, UndoAction } from "@/types/shift";
 import { generateId } from "@/lib/compliance";
 
+export interface CoverageRecord {
+  id: string;
+  employeeId: string;
+  coveredById: string;
+  originalRole: string;
+  coverRole: string;
+  reason: "lunch" | "break";
+  startedAt: number;
+  endedAt?: number;
+}
+
 interface ShiftContextType {
   employees: Employee[];
   settings: ShiftSettings;
   undoStack: UndoAction[];
+  coverageRecords: CoverageRecord[];
   addEmployee: (emp: Omit<Employee, "id" | "lunchStatus" | "breakStatus" | "status">) => void;
   updateEmployee: (id: string, updates: Partial<Employee>) => void;
   removeEmployee: (id: string) => void;
@@ -21,6 +33,10 @@ interface ShiftContextType {
   pushUndo: (action: Omit<UndoAction, "id" | "timestamp">) => void;
   popUndo: () => void;
   clearUndo: () => void;
+  addCoverage: (record: Omit<CoverageRecord, "id" | "startedAt">) => void;
+  endCoverage: (employeeId: string) => void;
+  getCoverageFor: (employeeId: string) => CoverageRecord | undefined;
+  getCoveringBy: (employeeId: string) => CoverageRecord | undefined;
 }
 
 const ShiftContext = createContext<ShiftContextType | null>(null);
@@ -41,6 +57,7 @@ export function ShiftProvider({ children }: { children: React.ReactNode }) {
     overtimeThresholdHours: 8,
   });
   const [undoStack, setUndoStack] = useState<UndoAction[]>([]);
+  const [coverageRecords, setCoverageRecords] = useState<CoverageRecord[]>([]);
 
   const pushUndo = useCallback((action: Omit<UndoAction, "id" | "timestamp">) => {
     setUndoStack(prev => [{ ...action, id: generateId(), timestamp: Date.now() }, ...prev].slice(0, MAX_UNDO));
@@ -123,6 +140,7 @@ export function ShiftProvider({ children }: { children: React.ReactNode }) {
     setEmployees(prev => prev.map(e =>
       e.id === id ? { ...e, lunchStatus: "returned", lunchEndedAt: Date.now() } : e
     ));
+    endCoverage(id);
   }, []);
 
   const startBreak = useCallback((id: string) => {
@@ -142,6 +160,7 @@ export function ShiftProvider({ children }: { children: React.ReactNode }) {
     setEmployees(prev => prev.map(e =>
       e.id === id ? { ...e, breakStatus: "returned", breakEndedAt: Date.now() } : e
     ));
+    endCoverage(id);
   }, []);
 
   const markAbsent = useCallback((id: string) => {
@@ -182,11 +201,33 @@ export function ShiftProvider({ children }: { children: React.ReactNode }) {
     setSettings(prev => ({ ...prev, ...s }));
   }, []);
 
+  // Coverage management
+  const addCoverage = useCallback((record: Omit<CoverageRecord, "id" | "startedAt">) => {
+    const newRecord: CoverageRecord = { ...record, id: generateId(), startedAt: Date.now() };
+    setCoverageRecords(prev => [...prev, newRecord]);
+  }, []);
+
+  const endCoverage = useCallback((employeeId: string) => {
+    setCoverageRecords(prev => prev.map(r =>
+      r.employeeId === employeeId && !r.endedAt ? { ...r, endedAt: Date.now() } : r
+    ));
+  }, []);
+
+  const getCoverageFor = useCallback((employeeId: string) => {
+    return coverageRecords.find(r => r.employeeId === employeeId && !r.endedAt);
+  }, [coverageRecords]);
+
+  const getCoveringBy = useCallback((employeeId: string) => {
+    return coverageRecords.find(r => r.coveredById === employeeId && !r.endedAt);
+  }, [coverageRecords]);
+
   return (
     <ShiftContext.Provider value={{
-      employees, settings, undoStack, addEmployee, updateEmployee, removeEmployee,
+      employees, settings, undoStack, coverageRecords,
+      addEmployee, updateEmployee, removeEmployee,
       assignLunch, startLunch, endLunch, startBreak, endBreak, markAbsent,
       clockOut, changeAssignment, updateSettings, pushUndo, popUndo, clearUndo,
+      addCoverage, endCoverage, getCoverageFor, getCoveringBy,
     }}>
       {children}
     </ShiftContext.Provider>
