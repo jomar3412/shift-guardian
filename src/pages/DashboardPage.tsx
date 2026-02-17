@@ -8,6 +8,7 @@ import { SearchBar } from "@/components/SearchBar";
 import { QuickAddShift } from "@/components/QuickAddShift";
 import { sortByCompliancePriority } from "@/lib/compliance";
 import { Shield } from "lucide-react";
+import { ShiftAssistant } from "@/components/ShiftAssistant";
 
 export default function DashboardPage() {
   const { employees } = useShift();
@@ -81,6 +82,8 @@ export default function DashboardPage() {
         <CoverageIndicator />
         <LunchQueue />
       </div>
+
+      <ShiftAssistant />
     </div>
   );
 }
