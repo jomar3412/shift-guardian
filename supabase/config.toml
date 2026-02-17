@@ -1,1 +1,4 @@
 project_id = "eojhhxmxobfndlzqufee"
+
+[functions.shift-assistant]
+verify_jwt = false
