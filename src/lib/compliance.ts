@@ -1,4 +1,13 @@
-import { ComplianceInfo, ComplianceLevel, Employee, SubRole } from "@/types/shift";
+import { ComplianceInfo, ComplianceLevel, Employee, ShiftSettings, SubRole } from "@/types/shift";
+
+function getMealPolicy(settings?: ShiftSettings) {
+  return {
+    deadlineHours: settings?.mealDeadlineHours ?? 5,
+    warningMinutes: settings?.warningMinutesBeforeDeadline ?? 60,
+    urgentMinutes: settings?.urgentMinutesBeforeDeadline ?? 30,
+    criticalMinutes: settings?.criticalMinutesBeforeDeadline ?? 15,
+  };
+}
 
 export function parseTime(time: string): Date {
   const [h, m] = time.split(":").map(Number);
@@ -34,15 +43,16 @@ export function getHoursWorked(employee: Employee): number {
   return Math.max(0, totalMinutes / 60);
 }
 
-export function getMinutesToFifthHour(employee: Employee): number {
+export function getMinutesToFifthHour(employee: Employee, settings?: ShiftSettings): number {
   if (!employee.actualStart || employee.status !== "active") return Infinity;
   if (employee.lunchStatus === "on_lunch" || employee.lunchStatus === "returned") return Infinity;
+  const policy = getMealPolicy(settings);
   const start = parseTime(employee.actualStart);
-  const fiveHourMark = new Date(start.getTime() + 5 * 60 * 60000);
-  return (fiveHourMark.getTime() - Date.now()) / 60000;
+  const mealDeadline = new Date(start.getTime() + policy.deadlineHours * 60 * 60000);
+  return (mealDeadline.getTime() - Date.now()) / 60000;
 }
 
-export function getComplianceInfo(employee: Employee): ComplianceInfo {
+export function getComplianceInfo(employee: Employee, settings?: ShiftSettings): ComplianceInfo {
   if (!employee.actualStart || employee.status !== "active") {
     return { level: "safe", hoursWorked: 0, minutesToFifthHour: Infinity, label: "Not started" };
   }
@@ -54,24 +64,24 @@ export function getComplianceInfo(employee: Employee): ComplianceInfo {
   const start = parseTime(employee.actualStart);
   const minutesSinceStart = (Date.now() - start.getTime()) / 60000;
   const hoursSinceStart = minutesSinceStart / 60;
-  const minutesToFifth = 300 - minutesSinceStart;
+  const policy = getMealPolicy(settings);
+  const minutesToDeadline = policy.deadlineHours * 60 - minutesSinceStart;
 
   let level: ComplianceLevel = "safe";
   let label = "On track";
 
-  if (hoursSinceStart >= 5) { level = "violation"; label = "VIOLATION"; }
-  else if (hoursSinceStart >= 4.75) { level = "critical"; label = "Critical risk!"; }
-  else if (hoursSinceStart >= 4.5) { level = "urgent"; label = "Must send soon"; }
-  else if (hoursSinceStart >= 4) { level = "warning"; label = "Plan lunch now"; }
-  else if (hoursSinceStart >= 3.5) { level = "warning"; label = "Soft warning"; }
+  if (minutesToDeadline <= 0) { level = "violation"; label = "VIOLATION"; }
+  else if (minutesToDeadline <= policy.criticalMinutes) { level = "critical"; label = "Critical risk!"; }
+  else if (minutesToDeadline <= policy.urgentMinutes) { level = "urgent"; label = "Must send soon"; }
+  else if (minutesToDeadline <= policy.warningMinutes) { level = "warning"; label = "Plan lunch now"; }
 
-  return { level, hoursWorked: hoursSinceStart, minutesToFifthHour: minutesToFifth, label };
+  return { level, hoursWorked: hoursSinceStart, minutesToFifthHour: minutesToDeadline, label };
 }
 
-export function getLunchPriorityQueue(employees: Employee[]): Employee[] {
+export function getLunchPriorityQueue(employees: Employee[], settings?: ShiftSettings): Employee[] {
   return employees
     .filter(e => e.status === "active" && e.actualStart && e.lunchStatus === "not_started")
-    .sort((a, b) => getMinutesToFifthHour(a) - getMinutesToFifthHour(b));
+    .sort((a, b) => getMinutesToFifthHour(a, settings) - getMinutesToFifthHour(b, settings));
 }
 
 export function getActiveCountByRole(employees: Employee[], subRoleId: string): number {
@@ -96,7 +106,7 @@ export function checkCoverageForLunch(employees: Employee[], employeeId: string,
 }
 
 /** Sort employees by compliance priority for dashboard display */
-export function sortByCompliancePriority(employees: Employee[]): Employee[] {
+export function sortByCompliancePriority(employees: Employee[], settings?: ShiftSettings): Employee[] {
   const levelOrder: Record<ComplianceLevel, number> = {
     violation: 0,
     critical: 1,
@@ -106,8 +116,8 @@ export function sortByCompliancePriority(employees: Employee[]): Employee[] {
   };
 
   return [...employees].sort((a, b) => {
-    const aInfo = getComplianceInfo(a);
-    const bInfo = getComplianceInfo(b);
+    const aInfo = getComplianceInfo(a, settings);
+    const bInfo = getComplianceInfo(b, settings);
     // Active first, then by compliance level
     if (a.status !== b.status) {
       if (a.status === "active") return -1;

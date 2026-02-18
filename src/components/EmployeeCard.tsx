@@ -3,7 +3,7 @@ import { Employee, ComplianceInfo } from "@/types/shift";
 import { useShift } from "@/context/ShiftContext";
 import { useApp } from "@/context/AppContext";
 import { useAuth } from "@/context/AuthContext";
-import { getComplianceInfo, formatDuration, getMinutesToFifthHour, checkCoverageForLunch } from "@/lib/compliance";
+import { getComplianceInfo, getMinutesToFifthHour, checkCoverageForLunch } from "@/lib/compliance";
 import { CoverageDialog } from "@/components/CoverageDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,29 +22,35 @@ const complianceColors: Record<string, { border: string; bg: string; dot: string
 const breakDot = "bg-primary";
 
 export function EmployeeCard({ employee }: { employee: Employee }) {
-  const { assignLunch, startLunch, endLunch, startBreak, endBreak, clockOut, changeAssignment, employees, getCoverageFor, getCoveringBy, addCoverage } = useShift();
+  const { startLunch, endLunch, startBreak, endBreak, clockOut, changeAssignment, employees, settings, getCoverageFor, getCoveringBy, addCoverage } = useShift();
   const { subRoles, employeeRecords, getPrimaryRoleById, getQualifiedSubRoles } = useApp();
   const { isAdmin } = useAuth();
-  const [info, setInfo] = useState<ComplianceInfo>(() => getComplianceInfo(employee));
+  const [info, setInfo] = useState<ComplianceInfo>(() => getComplianceInfo(employee, settings));
   const [expanded, setExpanded] = useState(false);
   const [showManualLunch, setShowManualLunch] = useState(false);
+  const [manualLunchMode, setManualLunchMode] = useState<"start" | "end">("start");
   const [manualLunchTime, setManualLunchTime] = useState("");
   const [coverageDialogOpen, setCoverageDialogOpen] = useState(false);
   const [coverageReason, setCoverageReason] = useState<"lunch" | "break">("lunch");
 
   useEffect(() => {
-    const interval = setInterval(() => setInfo(getComplianceInfo(employee)), 5000);
-    setInfo(getComplianceInfo(employee));
+    const interval = setInterval(() => setInfo(getComplianceInfo(employee, settings)), 5000);
+    setInfo(getComplianceInfo(employee, settings));
     return () => clearInterval(interval);
-  }, [employee]);
+  }, [employee, settings]);
 
   useEffect(() => {
     if (employee.lunchStatus !== "not_started" || employee.status !== "active") return;
-    const mins = getMinutesToFifthHour(employee);
-    if (mins <= 0) toast.error(`⚠️ VIOLATION: ${employee.name} has exceeded 5 hours without lunch!`);
-    else if (mins <= 15) toast.warning(`🔴 CRITICAL: ${employee.name} - ${Math.round(mins)}min to 5th hour!`);
-    else if (mins <= 30) toast.warning(`🟠 URGENT: ${employee.name} - ${Math.round(mins)}min to 5th hour`);
-  }, [info.level]);
+    const mins = getMinutesToFifthHour(employee, settings);
+    if (mins <= 0) toast.error(`⚠️ VIOLATION: ${employee.name} has passed meal deadline without lunch!`);
+    else if (mins <= settings.criticalMinutesBeforeDeadline) toast.warning(`🔴 CRITICAL: ${employee.name} - ${Math.round(mins)}min to meal deadline!`);
+    else if (mins <= settings.urgentMinutesBeforeDeadline) toast.warning(`🟠 URGENT: ${employee.name} - ${Math.round(mins)}min to meal deadline`);
+  }, [info.level, employee, settings]);
+
+  useEffect(() => {
+    if (!showManualLunch) return;
+    setManualLunchMode(employee.lunchStatus === "on_lunch" ? "end" : "start");
+  }, [showManualLunch, employee.lunchStatus]);
 
   const record = employeeRecords.find(r => r.id === employee.employeeRecordId);
   const qualifiedSubRoles = record ? getQualifiedSubRoles(record) : [];
@@ -101,23 +107,35 @@ export function EmployeeCard({ employee }: { employee: Employee }) {
     const [h, m] = manualLunchTime.split(":").map(Number);
     const d = new Date();
     d.setHours(h, m, 0, 0);
-    startLunch(employee.id, d.getTime());
-    toast.success(`${employee.name} lunch logged at ${manualLunchTime}`);
+    if (manualLunchMode === "start") {
+      startLunch(employee.id, d.getTime());
+      toast.success(`${employee.name} lunch start logged at ${manualLunchTime}`);
+    } else {
+      endLunch(employee.id, d.getTime());
+      toast.success(`${employee.name} lunch end logged at ${manualLunchTime}`);
+    }
     setShowManualLunch(false);
     setManualLunchTime("");
   };
 
   // Inactive states
-  if (employee.status === "absent" || employee.status === "clocked_out") {
+  if (employee.status === "absent" || employee.status === "clocked_out" || employee.status === "off") {
+    const scheduledLabel = `${employee.scheduledStart} - ${employee.scheduledEnd}`;
+    const offRoleName = currentSubRole?.name || "—";
     return (
       <div className="rounded-lg border border-border bg-card p-3 opacity-50">
         <div className="flex items-center gap-3">
           {employee.status === "absent" ? <UserX className="h-4 w-4 text-muted-foreground" /> : <LogOut className="h-4 w-4 text-muted-foreground" />}
           <span className="font-medium text-foreground text-sm">{employee.name}</span>
           <span className="compliance-badge bg-muted text-muted-foreground text-[10px]">
-            {employee.status === "absent" ? "Absent" : "Clocked Out"}
+            {employee.status === "absent" ? "Absent" : employee.status === "clocked_out" ? "Clocked Out" : "Scheduled"}
           </span>
         </div>
+        {employee.status === "off" && (
+          <div className="mt-1 text-xs text-muted-foreground">
+            {offRoleName} • {scheduledLabel}
+          </div>
+        )}
       </div>
     );
   }
@@ -141,13 +159,22 @@ export function EmployeeCard({ employee }: { employee: Employee }) {
             </div>
             <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
               <span className="font-medium">{currentSubRole?.name || "—"}</span>
-              {info.minutesToFifthHour !== Infinity && info.minutesToFifthHour > 0 && (
-                <span className={`font-mono ${info.level === "critical" || info.level === "violation" ? "text-compliance-critical font-bold" : ""}`}>
-                  {formatDuration(info.minutesToFifthHour)} to 5th
+              {isOnBreak && <span className="text-primary font-medium">On Break</span>}
+              {employee.scheduledLunch && (
+                <span className="inline-flex items-center gap-1 text-[10px] bg-muted rounded-full px-2 py-0.5">
+                  <UtensilsCrossed className="h-3 w-3" /> {employee.scheduledLunch}
                 </span>
               )}
-              {info.level === "violation" && <span className="text-compliance-violation font-bold">VIOLATION</span>}
-              {isOnBreak && <span className="text-primary font-medium">On Break</span>}
+              {employee.lunchStatus === "returned" && (
+                <span className="inline-flex items-center gap-1 text-[10px] bg-compliance-safe-bg text-compliance-safe rounded-full px-2 py-0.5">
+                  <UtensilsCrossed className="h-3 w-3" /> Lunch done
+                </span>
+              )}
+              {employee.breakStatus === "returned" && (
+                <span className="inline-flex items-center gap-1 text-[10px] bg-primary/10 text-primary rounded-full px-2 py-0.5">
+                  <Coffee className="h-3 w-3" /> Break done
+                </span>
+              )}
               {/* Coverage badges */}
               {coverByName && (
                 <span className="inline-flex items-center gap-1 text-[10px] bg-accent text-accent-foreground rounded-full px-2 py-0.5">
@@ -170,13 +197,29 @@ export function EmployeeCard({ employee }: { employee: Employee }) {
           <div className="px-3 pb-3 space-y-3 border-t border-border pt-3" onClick={e => e.stopPropagation()}>
             <div className="grid grid-cols-2 gap-2 text-xs">
               <InfoChip label="Assignment" value={currentSubRole?.name || "—"} />
-              <InfoChip label="Hours Worked" value={formatDuration(info.hoursWorked * 60)} />
-              <InfoChip
-                label="5th Hour In"
-                value={info.minutesToFifthHour === Infinity ? "—" : info.minutesToFifthHour <= 0 ? "PAST" : formatDuration(info.minutesToFifthHour)}
-                highlight={info.minutesToFifthHour < 60 && info.minutesToFifthHour > 0}
-              />
-              <InfoChip label="Sched. Lunch" value={employee.scheduledLunch || "—"} />
+              <InfoChip label="Shift" value={`${employee.scheduledStart} - ${employee.scheduledEnd}`} />
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isAdmin) return;
+                  if (employee.lunchStatus === "not_started") handleAssignLunchWithCoverage();
+                  if (employee.lunchStatus === "pending") handleStartLunch();
+                }}
+                className={`text-left rounded-md px-2 py-1.5 ${
+                  isAdmin && (employee.lunchStatus === "not_started" || employee.lunchStatus === "pending")
+                    ? "bg-muted hover:bg-muted/80"
+                    : "bg-muted"
+                }`}
+              >
+                <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Scheduled Lunch</div>
+                <div className="text-xs font-mono font-medium text-foreground">{employee.scheduledLunch || "—"}</div>
+                {isAdmin && employee.lunchStatus === "not_started" && (
+                  <div className="text-[10px] text-primary mt-0.5">Tap to assign lunch</div>
+                )}
+                {isAdmin && employee.lunchStatus === "pending" && (
+                  <div className="text-[10px] text-primary mt-0.5">Tap to start lunch</div>
+                )}
+              </button>
             </div>
 
             {/* Change assignment - admin only */}
@@ -197,16 +240,10 @@ export function EmployeeCard({ employee }: { employee: Employee }) {
             {isAdmin && (
               <div className="flex flex-wrap gap-2">
                 {employee.lunchStatus === "not_started" && (
-                  <>
-                    <Button size="default" variant="outline" className="gap-2 flex-1 min-w-[120px]" onClick={handleAssignLunchWithCoverage}>
-                      <UtensilsCrossed className="h-4 w-4" />
-                      Assign Lunch
-                    </Button>
-                    <Button size="default" className="gap-2 flex-1 min-w-[120px] bg-compliance-safe text-compliance-safe-foreground hover:bg-compliance-safe/90" onClick={handleStartLunch}>
-                      <Play className="h-4 w-4" />
-                      Start Lunch
-                    </Button>
-                  </>
+                  <Button size="default" className="gap-2 flex-1 min-w-[120px] bg-compliance-safe text-compliance-safe-foreground hover:bg-compliance-safe/90" onClick={handleStartLunch}>
+                    <Play className="h-4 w-4" />
+                    Start Lunch
+                  </Button>
                 )}
                 {employee.lunchStatus === "pending" && (
                   <>
@@ -230,17 +267,36 @@ export function EmployeeCard({ employee }: { employee: Employee }) {
                   <span className="compliance-badge bg-compliance-safe-bg text-compliance-safe text-xs">✓ Lunch done</span>
                 )}
 
-                {(employee.lunchStatus === "not_started" || employee.lunchStatus === "pending") && (
+                {employee.lunchStatus !== "returned" && (
                   <Button size="sm" variant="ghost" className="text-xs text-muted-foreground" onClick={() => setShowManualLunch(!showManualLunch)}>
                     <Clock className="h-3 w-3 mr-1" />
-                    Enter Time
+                    Manual Override
                   </Button>
                 )}
               </div>
             )}
 
             {isAdmin && showManualLunch && (
-              <div className="flex gap-2 items-center">
+              <div className="flex flex-wrap gap-2 items-center">
+                {employee.lunchStatus === "on_lunch" ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setManualLunchMode("end")}
+                    className={manualLunchMode === "end" ? "ring-2 ring-primary" : ""}
+                  >
+                    Log Lunch End
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setManualLunchMode("start")}
+                    className={manualLunchMode === "start" ? "ring-2 ring-primary" : ""}
+                  >
+                    Log Lunch Start
+                  </Button>
+                )}
                 <Input type="time" value={manualLunchTime} onChange={e => setManualLunchTime(e.target.value)} className="h-9 text-sm flex-1" />
                 <Button size="sm" onClick={handleManualLunch} disabled={!manualLunchTime}>Confirm</Button>
               </div>

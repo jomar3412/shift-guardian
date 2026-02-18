@@ -21,9 +21,10 @@ You have access to the following real-time shift data:
 ${JSON.stringify(shiftContext, null, 2)}
 
 KEY RULES:
-- Employees MUST take their lunch before the 5th hour of work to avoid a compliance violation.
-- "minutesToFifthHour" shows how many minutes remain before the 5th-hour mark. Lower = more urgent.
-- When suggesting who should go to lunch, prioritize employees closest to the 5th-hour mark.
+- Employees MUST take lunch before the configured meal deadline to avoid a compliance violation.
+- "policy.mealDeadlineHours" is the current deadline in hours for this company/state.
+- "minutesToFifthHour" shows minutes remaining before that configured meal deadline. Lower = more urgent.
+- When suggesting who should go to lunch, prioritize employees closest to the configured meal deadline.
 - Always check coverage: if sending someone to lunch drops a role below its minimum coverage, warn the manager and suggest alternatives.
 - "coverageProtection" roles have a "minCoverage" threshold that must be maintained.
 - Employees can only be reassigned to sub-roles they are qualified for.

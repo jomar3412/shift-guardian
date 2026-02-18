@@ -11,7 +11,7 @@ import { Shield } from "lucide-react";
 import { ShiftAssistant } from "@/components/ShiftAssistant";
 
 export default function DashboardPage() {
-  const { employees } = useShift();
+  const { employees, settings } = useShift();
   const [, setTick] = useState(0);
   const [search, setSearch] = useState("");
 
@@ -20,12 +20,13 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const sorted = sortByCompliancePriority(employees);
+  const sorted = sortByCompliancePriority(employees, settings);
   const filtered = search
     ? sorted.filter(e => e.name.toLowerCase().includes(search.toLowerCase()))
     : sorted;
 
-  const activeEmployees = filtered.filter(e => e.status === "active");
+  const activeEmployees = filtered.filter(e => e.status === "active" && e.lunchStatus !== "on_lunch");
+  const scheduledLaterEmployees = filtered.filter(e => e.status === "off");
   const onLunchEmployees = filtered.filter(e => e.lunchStatus === "on_lunch");
   const inactiveEmployees = filtered.filter(e => e.status === "absent" || e.status === "clocked_out");
 
@@ -52,6 +53,14 @@ export default function DashboardPage() {
             {activeEmployees.map(emp => (
               <EmployeeCard key={emp.id} employee={emp} />
             ))}
+            {scheduledLaterEmployees.length > 0 && (
+              <>
+                <h3 className="text-xs font-medium text-muted-foreground pt-1 uppercase tracking-wider">Scheduled Later</h3>
+                {scheduledLaterEmployees.map(emp => (
+                  <EmployeeCard key={emp.id} employee={emp} />
+                ))}
+              </>
+            )}
             {onLunchEmployees.length > 0 && (
               <>
                 <h3 className="text-xs font-medium text-muted-foreground pt-1 uppercase tracking-wider">On Lunch</h3>

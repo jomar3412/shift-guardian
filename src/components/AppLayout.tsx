@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Shield, LayoutDashboard, CalendarClock, Users, Tags, Settings, Clock, LogOut } from "lucide-react";
+import { Shield, LayoutDashboard, CalendarClock, Users, Tags, Settings, Clock, LogOut, Scale } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import { useAuth } from "@/context/AuthContext";
 import { cn } from "@/lib/utils";
@@ -21,6 +21,7 @@ export function AppLayout() {
     { to: "/shifts", icon: CalendarClock, label: "Manage Shifts", show: isAdmin },
     { to: "/employees", icon: Users, label: "Employees", show: isAdmin },
     { to: "/roles", icon: Tags, label: "Roles", show: isAdmin },
+    { to: "/compliance", icon: Scale, label: "Compliance", show: isAdmin },
     { to: "/settings", icon: Settings, label: "Settings", show: isAdmin },
   ].filter(item => item.show);
 

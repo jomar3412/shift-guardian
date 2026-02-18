@@ -14,16 +14,135 @@ import { Plus, Pencil, Trash2, ChevronDown, ChevronUp, User } from "lucide-react
 import { toast } from "sonner";
 import { EmployeeRecord, QualificationEntry } from "@/types/shift";
 
+function normalizeEmployeeName(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+}
+
+function parseImportedNames(input: string): string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  const lines = input.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const cells = line
+      .split(/\t|,/)
+      .map((cell) => cell.replace(/^"+|"+$/g, "").trim())
+      .filter(Boolean);
+
+    if (!cells.length) continue;
+    const candidate = cells[0];
+    if (i === 0 && /^(name|employee|associate)$/i.test(candidate)) continue;
+    if (/^\d{1,2}:\d{2}/.test(candidate)) continue;
+    if (candidate.length < 2) continue;
+
+    const key = normalizeEmployeeName(candidate);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    names.push(candidate);
+  }
+
+  return names;
+}
+
+async function fileToText(file: File): Promise<string> {
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Could not read file"));
+    reader.readAsText(file);
+  });
+}
+
 export default function EmployeesPage() {
   const { employeeRecords, addEmployeeRecord, updateEmployeeRecord, removeEmployeeRecord, primaryRoles, subRoles } = useApp();
   const [addOpen, setAddOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [bulkText, setBulkText] = useState("");
+  const [bulkFile, setBulkFile] = useState<File | null>(null);
+  const [bulkPrimaryRoleId, setBulkPrimaryRoleId] = useState("");
+  const [bulkHasRegisterAccess, setBulkHasRegisterAccess] = useState(true);
+  const [bulkActive, setBulkActive] = useState(true);
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [bulkPreview, setBulkPreview] = useState<string[]>([]);
 
   const filtered = search
     ? employeeRecords.filter(e => e.name.toLowerCase().includes(search.toLowerCase()))
     : employeeRecords;
+
+  const handleAnalyzeBulk = async () => {
+    if (!bulkText.trim() && !bulkFile) {
+      toast.error("Paste names or upload a file.");
+      return;
+    }
+    setBulkLoading(true);
+    try {
+      let text = bulkText;
+      if (bulkFile) {
+        const fileText = await fileToText(bulkFile);
+        text = `${text}\n${fileText}`.trim();
+      }
+      const parsed = parseImportedNames(text);
+      if (!parsed.length) {
+        toast.error("No names found in that input.");
+        setBulkPreview([]);
+        return;
+      }
+      setBulkPreview(parsed);
+      toast.success(`Found ${parsed.length} names.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not analyze file");
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  const handleApplyBulk = () => {
+    if (!bulkPrimaryRoleId) {
+      toast.error("Select a primary role first.");
+      return;
+    }
+    if (!bulkPreview.length) {
+      toast.error("Analyze names first.");
+      return;
+    }
+
+    const existing = new Set(employeeRecords.map((e) => normalizeEmployeeName(e.name)));
+    let added = 0;
+    let skipped = 0;
+
+    for (const name of bulkPreview) {
+      const key = normalizeEmployeeName(name);
+      if (!key || existing.has(key)) {
+        skipped += 1;
+        continue;
+      }
+      addEmployeeRecord({
+        name,
+        primaryRoleId: bulkPrimaryRoleId,
+        qualifications: [],
+        hasRegisterAccess: bulkHasRegisterAccess,
+        active: bulkActive,
+        notes: "",
+      });
+      existing.add(key);
+      added += 1;
+    }
+
+    toast.success(`Imported ${added} employee${added === 1 ? "" : "s"}${skipped ? `, skipped ${skipped}` : ""}.`);
+    if (added > 0) {
+      setBulkOpen(false);
+      setBulkText("");
+      setBulkFile(null);
+      setBulkPreview([]);
+      setBulkPrimaryRoleId("");
+      setBulkHasRegisterAccess(true);
+      setBulkActive(true);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -32,29 +151,95 @@ export default function EmployeesPage() {
           <h2 className="text-lg font-semibold text-foreground">Employees</h2>
           <p className="text-xs text-muted-foreground">{employeeRecords.length} registered</p>
         </div>
-        <Dialog open={addOpen} onOpenChange={setAddOpen}>
-          <DialogTrigger asChild>
-            <Button className="gap-2" size="sm">
-              <Plus className="h-4 w-4" />
-              <span className="hidden sm:inline">Add Employee</span>
-              <span className="sm:hidden">Add</span>
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Add Employee</DialogTitle>
-            </DialogHeader>
-            <EmployeeForm
-              primaryRoles={primaryRoles}
-              subRoles={subRoles}
-              onSave={(data) => {
-                addEmployeeRecord(data);
-                setAddOpen(false);
-                toast.success("Employee added");
-              }}
-            />
-          </DialogContent>
-        </Dialog>
+        <div className="flex items-center gap-2">
+          <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-2">
+                <span className="hidden sm:inline">Bulk Import</span>
+                <span className="sm:hidden">Import</span>
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Bulk Import Employees</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Upload CSV/TXT (optional)</Label>
+                  <Input type="file" accept=".csv,.txt,text/csv,text/plain" onChange={(e) => setBulkFile(e.target.files?.[0] ?? null)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Paste names or rows</Label>
+                  <Textarea
+                    value={bulkText}
+                    onChange={(e) => setBulkText(e.target.value)}
+                    rows={5}
+                    placeholder={"Jane Smith\nJohn Doe\nOr CSV first column with names"}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Default Primary Role</Label>
+                  <Select value={bulkPrimaryRoleId} onValueChange={setBulkPrimaryRoleId}>
+                    <SelectTrigger><SelectValue placeholder="Select role..." /></SelectTrigger>
+                    <SelectContent>
+                      {primaryRoles.map((r: any) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs">Default Register Access</Label>
+                  <Switch checked={bulkHasRegisterAccess} onCheckedChange={setBulkHasRegisterAccess} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs">Default Active Status</Label>
+                  <Switch checked={bulkActive} onCheckedChange={setBulkActive} />
+                </div>
+                <div className="flex gap-2">
+                  <Button onClick={handleAnalyzeBulk} disabled={bulkLoading} variant="outline" className="flex-1">
+                    {bulkLoading ? "Analyzing..." : "Analyze"}
+                  </Button>
+                  <Button onClick={handleApplyBulk} className="flex-1">Apply</Button>
+                </div>
+                {bulkPreview.length > 0 && (
+                  <div className="rounded-md border border-border p-2.5">
+                    <div className="text-xs font-medium">{bulkPreview.length} names ready</div>
+                    <div className="mt-1 space-y-1 max-h-36 overflow-y-auto">
+                      {bulkPreview.slice(0, 25).map((name) => (
+                        <div key={name} className="text-xs text-muted-foreground">{name}</div>
+                      ))}
+                      {bulkPreview.length > 25 && (
+                        <div className="text-xs text-muted-foreground">+{bulkPreview.length - 25} more</div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
+          <Dialog open={addOpen} onOpenChange={setAddOpen}>
+            <DialogTrigger asChild>
+              <Button className="gap-2" size="sm">
+                <Plus className="h-4 w-4" />
+                <span className="hidden sm:inline">Add Employee</span>
+                <span className="sm:hidden">Add</span>
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Add Employee</DialogTitle>
+              </DialogHeader>
+              <EmployeeForm
+                primaryRoles={primaryRoles}
+                subRoles={subRoles}
+                onSave={(data) => {
+                  addEmployeeRecord(data);
+                  setAddOpen(false);
+                  toast.success("Employee added");
+                }}
+              />
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       <SearchBar value={search} onChange={setSearch} placeholder="Search employees..." />

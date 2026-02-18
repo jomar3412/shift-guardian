@@ -13,7 +13,9 @@ import ManageShiftsPage from "@/pages/ManageShiftsPage";
 import EmployeesPage from "@/pages/EmployeesPage";
 import RolesPage from "@/pages/RolesPage";
 import SettingsPage from "@/pages/SettingsPage";
+import CompliancePage from "@/pages/CompliancePage";
 import AuthPage from "@/pages/AuthPage";
+import ResetPasswordPage from "@/pages/ResetPasswordPage";
 import NotFound from "@/pages/NotFound";
 import { Loader2 } from "lucide-react";
 
@@ -43,11 +45,13 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/auth" element={user ? <Navigate to="/" replace /> : <AuthPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/shifts" element={<ProtectedRoute adminOnly><ManageShiftsPage /></ProtectedRoute>} />
         <Route path="/employees" element={<ProtectedRoute adminOnly><EmployeesPage /></ProtectedRoute>} />
         <Route path="/roles" element={<ProtectedRoute adminOnly><RolesPage /></ProtectedRoute>} />
+        <Route path="/compliance" element={<ProtectedRoute adminOnly><CompliancePage /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute adminOnly><SettingsPage /></ProtectedRoute>} />
       </Route>
       <Route path="*" element={<NotFound />} />

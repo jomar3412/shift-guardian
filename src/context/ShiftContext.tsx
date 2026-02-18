@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from "react";
+import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
 import { Employee, ShiftSettings, UndoAction } from "@/types/shift";
 import { generateId } from "@/lib/compliance";
 
@@ -23,7 +23,7 @@ interface ShiftContextType {
   removeEmployee: (id: string) => void;
   assignLunch: (id: string) => void;
   startLunch: (id: string, manualTime?: number) => void;
-  endLunch: (id: string) => void;
+  endLunch: (id: string, manualTime?: number) => void;
   startBreak: (id: string) => void;
   endBreak: (id: string) => void;
   markAbsent: (id: string) => void;
@@ -48,14 +48,51 @@ export function useShift() {
 }
 
 const MAX_UNDO = 5;
+const SHIFT_SETTINGS_KEY = "sg_shift_settings";
 
-export function ShiftProvider({ children }: { children: React.ReactNode }) {
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [settings, setSettings] = useState<ShiftSettings>({
+function defaultShiftSettings(): ShiftSettings {
+  return {
     minCashiers: 2,
     gracePeriodMinutes: 5,
     overtimeThresholdHours: 8,
-  });
+    mealDeadlineHours: 5,
+    warningMinutesBeforeDeadline: 60,
+    urgentMinutesBeforeDeadline: 30,
+    criticalMinutesBeforeDeadline: 15,
+    jurisdictionState: "CA",
+    lawReviewIntervalDays: 30,
+    lawSourceUrl: "https://www.dol.gov/agencies/whd/state/contacts",
+  };
+}
+
+function loadShiftSettings(): ShiftSettings {
+  try {
+    const raw = localStorage.getItem(SHIFT_SETTINGS_KEY);
+    if (!raw) return defaultShiftSettings();
+    return { ...defaultShiftSettings(), ...JSON.parse(raw) };
+  } catch {
+    return defaultShiftSettings();
+  }
+}
+
+function parseShiftTime(time: string): Date | null {
+  const [h, m] = time.split(":").map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return null;
+  const d = new Date();
+  d.setHours(h, m, 0, 0);
+  return d;
+}
+
+function getAutoStatus(emp: Employee): Employee["status"] {
+  if (emp.status === "absent" || emp.status === "clocked_out") return emp.status;
+  const start = parseShiftTime(emp.actualStart || emp.scheduledStart);
+  if (!start) return "active";
+  return Date.now() >= start.getTime() ? "active" : "off";
+}
+
+export function ShiftProvider({ children }: { children: React.ReactNode }) {
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [settings, setSettings] = useState<ShiftSettings>(() => loadShiftSettings());
   const [undoStack, setUndoStack] = useState<UndoAction[]>([]);
   const [coverageRecords, setCoverageRecords] = useState<CoverageRecord[]>([]);
 
@@ -75,14 +112,16 @@ export function ShiftProvider({ children }: { children: React.ReactNode }) {
   const clearUndo = useCallback(() => setUndoStack([]), []);
 
   const addEmployee = useCallback((emp: Omit<Employee, "id" | "lunchStatus" | "breakStatus" | "status">) => {
+    const actualStart = emp.actualStart || emp.scheduledStart;
     const newEmp: Employee = {
       ...emp,
       id: generateId(),
       lunchStatus: "not_started",
       breakStatus: "not_started",
       status: "active",
-      actualStart: emp.actualStart || emp.scheduledStart,
+      actualStart,
     };
+    newEmp.status = getAutoStatus(newEmp);
     setEmployees(prev => [...prev, newEmp]);
     pushUndo({
       label: `Added ${emp.name} to shift`,
@@ -136,9 +175,10 @@ export function ShiftProvider({ children }: { children: React.ReactNode }) {
     }
   }, [employees, pushUndo]);
 
-  const endLunch = useCallback((id: string) => {
+  const endLunch = useCallback((id: string, manualTime?: number) => {
+    const ts = manualTime || Date.now();
     setEmployees(prev => prev.map(e =>
-      e.id === id ? { ...e, lunchStatus: "returned", lunchEndedAt: Date.now() } : e
+      e.id === id ? { ...e, lunchStatus: "returned", lunchEndedAt: ts } : e
     ));
     endCoverage(id);
   }, []);
@@ -220,6 +260,30 @@ export function ShiftProvider({ children }: { children: React.ReactNode }) {
   const getCoveringBy = useCallback((employeeId: string) => {
     return coverageRecords.find(r => r.coveredById === employeeId && !r.endedAt);
   }, [coverageRecords]);
+
+  // Keep scheduled future employees grayed out until their start time.
+  useEffect(() => {
+    const syncStatuses = () => {
+      setEmployees(prev => {
+        let changed = false;
+        const next = prev.map(emp => {
+          const auto = getAutoStatus(emp);
+          if (auto === emp.status) return emp;
+          changed = true;
+          return { ...emp, status: auto };
+        });
+        return changed ? next : prev;
+      });
+    };
+
+    syncStatuses();
+    const id = window.setInterval(syncStatuses, 60000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(SHIFT_SETTINGS_KEY, JSON.stringify(settings));
+  }, [settings]);
 
   return (
     <ShiftContext.Provider value={{

@@ -26,7 +26,7 @@ export function ShiftAssistant() {
   const inputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
-  const { employees } = useShift();
+  const { employees, settings } = useShift();
   const { subRoles, employeeRecords, primaryRoles } = useApp();
 
   useEffect(() => {
@@ -44,7 +44,7 @@ export function ShiftAssistant() {
     return {
       currentTime: new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true }),
       employees: activeEmps.map(emp => {
-        const info = getComplianceInfo(emp);
+        const info = getComplianceInfo(emp, settings);
         const record = employeeRecords.find(r => r.id === emp.employeeRecordId);
         const primaryRole = primaryRoles.find(r => r.id === emp.primaryRoleId);
         const currentSub = subRoles.find(r => r.id === emp.currentAssignmentId);
@@ -60,7 +60,7 @@ export function ShiftAssistant() {
           breakStatus: emp.breakStatus,
           complianceLevel: info.level,
           hoursWorked: Math.round(info.hoursWorked * 100) / 100,
-          minutesToFifthHour: Math.round(getMinutesToFifthHour(emp)),
+          minutesToFifthHour: Math.round(getMinutesToFifthHour(emp, settings)),
           qualifiedRoles,
         };
       }),
@@ -72,8 +72,12 @@ export function ShiftAssistant() {
       })),
       totalActive: activeEmps.filter(e => e.status === "active").length,
       onLunch: activeEmps.filter(e => e.lunchStatus === "on_lunch").length,
+      policy: {
+        state: settings.jurisdictionState,
+        mealDeadlineHours: settings.mealDeadlineHours,
+      },
     };
-  }, [employees, subRoles, employeeRecords, primaryRoles]);
+  }, [employees, subRoles, employeeRecords, primaryRoles, settings]);
 
   const sendMessage = async (text: string) => {
     if (!text.trim() || isLoading) return;

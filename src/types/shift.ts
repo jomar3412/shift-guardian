@@ -64,6 +64,14 @@ export interface ShiftSettings {
   minCashiers: number;
   gracePeriodMinutes: number;
   overtimeThresholdHours: number;
+  mealDeadlineHours: number;
+  warningMinutesBeforeDeadline: number;
+  urgentMinutesBeforeDeadline: number;
+  criticalMinutesBeforeDeadline: number;
+  jurisdictionState: string;
+  lawSourceUrl?: string;
+  lawLastReviewedAt?: number;
+  lawReviewIntervalDays: number;
 }
 
 export interface AppSettings {

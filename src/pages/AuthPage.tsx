@@ -15,6 +15,7 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [companyName, setCompanyName] = useState("");
 
@@ -33,6 +34,11 @@ export default function AuthPage() {
     if (mode === "signup") {
       if (!fullName.trim() || !companyName.trim()) {
         toast.error("Please fill in all fields");
+        setLoading(false);
+        return;
+      }
+      if (password !== confirmPassword) {
+        toast.error("Passwords do not match");
         setLoading(false);
         return;
       }
@@ -84,6 +90,20 @@ export default function AuthPage() {
               <div className="space-y-2">
                 <Label htmlFor="password">Password</Label>
                 <Input id="password" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required minLength={6} />
+              </div>
+            )}
+            {mode === "signup" && (
+              <div className="space-y-2">
+                <Label htmlFor="confirmPassword">Confirm Password</Label>
+                <Input
+                  id="confirmPassword"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={e => setConfirmPassword(e.target.value)}
+                  placeholder="••••••••"
+                  required
+                  minLength={6}
+                />
               </div>
             )}
             <Button type="submit" className="w-full" disabled={loading}>

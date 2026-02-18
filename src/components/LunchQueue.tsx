@@ -3,8 +3,8 @@ import { getLunchPriorityQueue, getComplianceInfo, formatDuration } from "@/lib/
 import { Clock, ChevronRight } from "lucide-react";
 
 export function LunchQueue() {
-  const { employees } = useShift();
-  const queue = getLunchPriorityQueue(employees);
+  const { employees, settings } = useShift();
+  const queue = getLunchPriorityQueue(employees, settings);
 
   if (queue.length === 0) {
     return (
@@ -22,7 +22,7 @@ export function LunchQueue() {
       </h3>
       <div className="space-y-1">
         {queue.map((emp, i) => {
-          const info = getComplianceInfo(emp);
+          const info = getComplianceInfo(emp, settings);
           const bgClass = {
             safe: "bg-compliance-safe-bg",
             warning: "bg-compliance-warning-bg",
@@ -51,7 +51,7 @@ export function LunchQueue() {
                 <div className={`text-xs font-medium ${textClass}`}>
                   {info.minutesToFifthHour <= 0
                     ? "VIOLATION"
-                    : `${formatDuration(info.minutesToFifthHour)} to 5th hour`}
+                    : `${formatDuration(info.minutesToFifthHour)} to meal deadline`}
                 </div>
               </div>
               <ChevronRight className={`h-4 w-4 flex-shrink-0 ${textClass}`} />
