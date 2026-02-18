@@ -10,7 +10,7 @@ import { toast } from "sonner";
 type Mode = "login" | "signup" | "forgot";
 
 export default function AuthPage() {
-  const { signIn, signUp, resetPassword } = useAuth();
+  const { signIn, signInWithGoogle, signUp, resetPassword } = useAuth();
   const [mode, setMode] = useState<Mode>("login");
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState("");
@@ -69,6 +69,30 @@ export default function AuthPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {mode === "login" && (
+            <div className="space-y-3 mb-4">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                onClick={async () => {
+                  const { error } = await signInWithGoogle();
+                  if (error) toast.error(error);
+                }}
+              >
+                Continue with Google
+              </Button>
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-border" />
+                </div>
+                <div className="relative flex justify-center text-[11px] uppercase">
+                  <span className="bg-card px-2 text-muted-foreground">or use email</span>
+                </div>
+              </div>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             {mode === "signup" && (
               <>
@@ -120,6 +144,9 @@ export default function AuthPage() {
                 <button onClick={() => setMode("forgot")} className="text-primary hover:underline block mx-auto">
                   Forgot password?
                 </button>
+                <p className="text-[11px] text-muted-foreground">
+                  If you signed up with Google, use the Google button instead of password reset.
+                </p>
                 <p className="text-muted-foreground">
                   Don't have an account?{" "}
                   <button onClick={() => setMode("signup")} className="text-primary hover:underline">Sign up</button>
